@@ -1,0 +1,92 @@
+WITH account AS (
+SELECT /*рахуємо акаунти, групуємо за 5ма категоріями*/
+  s.date,
+  sp.country,
+  a.send_interval,
+  a.is_verified,
+  a.is_unsubscribed,
+  COUNT(DISTINCT a.id) AS account_cnt,
+  NULL AS sent_msg,
+  NULL AS open_msg,
+  NULL AS visit_msg
+FROM `DA.account` a
+JOIN `DA.account_session` acs ON a.id = acs.account_id
+JOIN `DA.session_params` sp ON acs.ga_session_id = sp.ga_session_id
+JOIN `DA.session` s ON acs.ga_session_id = s.ga_session_id
+GROUP BY s.date, sp.country, a.send_interval, a.is_verified, a.is_unsubscribed
+),
+email_metrics AS (
+SELECT /*рахуємо імейли, дату відправлення, групуємо за 5ма категоріями*/
+  DATE_ADD(s.date, INTERVAL es.sent_date DAY) as date,
+  sp.country,
+  a.send_interval,
+  a.is_verified,
+  a.is_unsubscribed,
+  NULL as account_cnt,
+  COUNT(DISTINCT es.id_message) AS sent_msg,
+  COUNT(DISTINCT eo.id_message) AS open_msg,
+  COUNT(DISTINCT ev.id_message) AS visit_msg
+FROM `DA.email_sent` es
+LEFT JOIN `DA.email_open` eo ON es.id_message = eo.id_message
+LEFT JOIN `DA.email_visit` ev ON es.id_message = ev.id_message
+JOIN `DA.account` a ON es.id_account = a.id
+JOIN `DA.account_session` acs ON es.id_account = acs.account_id
+JOIN `DA.session_params` sp ON acs.ga_session_id = sp.ga_session_id
+JOIN `DA.session` s ON acs.ga_session_id = s.ga_session_id
+GROUP BY 1, sp.country, a.send_interval, a.is_verified, a.is_unsubscribed
+),
+unions AS (
+SELECT /*об'єднуємо акаунти та імейли*/
+  date,
+  country,
+  send_interval,
+  is_verified,
+  is_unsubscribed,
+  account_cnt,
+  sent_msg,
+  open_msg,
+  visit_msg
+FROM account
+UNION ALL
+SELECT
+  date,
+  country,
+  send_interval,
+  is_verified,
+  is_unsubscribed,
+  account_cnt,
+  sent_msg,
+  open_msg,
+  visit_msg
+FROM email_metrics
+),
+final_groups AS (
+SELECT /*ще раз групуємо за 5ма категоріями, щоб привести всі події до спільного вигляду після об'єднання*/
+  unions.date,
+  unions.country,
+  unions.send_interval,
+  unions.is_verified,
+  unions.is_unsubscribed,
+  SUM(unions.account_cnt) AS account_cnt,
+  SUM(unions.sent_msg) AS sent_msg,
+  SUM(unions.open_msg) AS open_msg,
+  SUM(unions.visit_msg) AS visit_msg
+FROM unions
+GROUP BY unions.date, unions.country, unions.send_interval, unions.is_verified, unions.is_unsubscribed
+),
+sums AS (
+SELECT /*додаємо віконні функції - визначаємо загальну кількість акаунтів та надісланих імейлів по кожній країні*/
+  *,
+  SUM(final_groups.account_cnt) OVER (PARTITION BY final_groups.country) AS total_country_account_cnt,
+  SUM(final_groups.sent_msg) OVER (PARTITION BY final_groups.country) AS total_country_sent_cnt
+FROM final_groups
+),
+ranks AS (
+SELECT *, /*визначаємо топ-10 країн*/
+  DENSE_RANK() OVER (ORDER BY total_country_account_cnt DESC) AS rank_total_country_account_cnt,
+  DENSE_RANK() OVER (ORDER BY total_country_sent_cnt DESC) AS rank_total_country_sent_cnt
+FROM sums
+)
+SELECT * /*відфільтровуємо зайві країни, залишаємо топ-10*/
+FROM ranks
+WHERE rank_total_country_account_cnt <= 10 OR rank_total_country_sent_cnt <= 10
