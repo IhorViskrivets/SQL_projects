@@ -1,0 +1,14 @@
+WITH youtube AS(
+SELECT
+sp.continent,
+COUNT(CASE WHEN params.key = 'page_title' AND params.value.string_value LIKE '%YouTube%' THEN event_name END)*1.0 AS youtube_cnt,
+COUNT(CASE WHEN params.key = 'page_title' AND params.value.string_value IS NOT NULL THEN event_name END)*1.0 AS tot_cnt
+FROM `DA.event_params` ep, UNNEST(event_params) AS params
+JOIN `DA.session_params` sp
+ON ep.ga_session_id = sp.ga_session_id
+GROUP BY sp.continent
+)
+SELECT
+youtube.continent,
+youtube_cnt / tot_cnt * 100 AS youtube_percent
+FROM youtube
