@@ -1,0 +1,42 @@
+WITH acc_ses AS(
+SELECT
+sp.continent,
+COUNT(a.id) AS Account_Count,
+COUNT(CASE WHEN is_verified = 1 THEN is_verified END) AS Verified_Account,
+COUNT(DISTINCT s.ga_session_id) AS Session_Count
+FROM `DA.account` a
+JOIN `DA.account_session` acs
+ON a.id = acs.account_id
+RIGHT JOIN `DA.session` s
+ON acs.ga_session_id = s.ga_session_id
+JOIN `DA.session_params` sp
+ON s.ga_session_id = sp.ga_session_id
+GROUP BY sp.continent
+),
+rev_sum AS(
+SELECT
+sp.continent,
+SUM(p.price) AS Revenue,
+SUM(CASE WHEN sp.device = 'mobile' THEN p.price END) AS Revenue_from_Mobile,
+SUM(CASE WHEN sp.device = 'desktop' THEN p.price END) AS Revenue_from_Desktop,
+SUM(CASE WHEN sp.device = 'mobile' THEN p.price END) / SUM(p.price) * 100  AS Mobile_Percent_Revenue_From_Total,
+FROM `DA.order` o
+JOIN `DA.product` p
+ON o.item_id = p.item_id
+JOIN `DA.session_params` sp
+ON o.ga_session_id = sp.ga_session_id
+GROUP BY sp.continent
+)
+
+SELECT
+acc_ses.continent,
+rev_sum.Revenue,
+rev_sum.Revenue_from_Mobile,
+rev_sum.Revenue_from_Desktop,
+rev_sum.Mobile_Percent_Revenue_From_Total,
+acc_ses.Account_Count,
+acc_ses.Verified_Account,
+acc_ses.Session_Count
+FROM acc_ses
+LEFT JOIN rev_sum
+ON acc_ses.continent = rev_sum.continent
